@@ -8,3 +8,4 @@ numpy
 pydub
 gTTS
 pyttsx3
+pymongo[srv]~=4.6.1

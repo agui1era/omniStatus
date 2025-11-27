@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# server.py — API de eventos + análisis (Python 3.9 compatible)
+# server.py — API de eventos + análisis (MongoDB)
 
 import os
 import json
@@ -11,17 +11,19 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-import threading
-import time
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 load_dotenv()
 
-
 # ===== Config (.env) =====
-OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL     = os.getenv("OPENAI_MODEL", "gpt-4.1")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "omnistatus")
+MONGO_COLL_NAME = os.getenv("MONGO_COLL_NAME", "events")
 
-SYSTEM_PROMPT    = os.getenv(
+SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
     "Eres un sistema experto en seguridad. "
     "Debes responder EXCLUSIVAMENTE un JSON válido con claves: "
@@ -29,96 +31,61 @@ SYSTEM_PROMPT    = os.getenv(
     "No incluyas nada fuera del objeto JSON."
 )
 
-PROMPT_ANALYSIS  = os.getenv(
+PROMPT_ANALYSIS = os.getenv(
     "PROMPT_ANALYSIS",
     "Analiza eventos y devuelve JSON {\"score\":float,\"text\":string}."
 )
 
-EVENT_LOG_FILE   = os.getenv("EVENT_LOG_FILE", "events.log")
-LOG_CLEAN_DAYS   = int(os.getenv("LOG_CLEAN_DAYS", "30"))
+# ===== MongoDB Setup =====
+client = MongoClient(MONGO_URI)
+db = client[MONGO_DB_NAME]
+coll = db[MONGO_COLL_NAME]
 
 # ===== App =====
 app = FastAPI()
 
-# CORS para permitir inyección desde navegador (p. ej., 127.0.0.1:5500)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost",
-        "http://localhost:5500",
-        "http://127.0.0.1",
-        "http://127.0.0.1:5500",
-        "http://0.0.0.0",
-        "http://0.0.0.0:5500",
-        "*",  # desarrollo; restringir en producción
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ===== Modelos =====
+# ===== Nuevo Modelo =====
 class Event(BaseModel):
     source: str
-    description: str
-    value: Optional[float] = None
+    text: str            # descripción del evento
+    score: Optional[float] = None  # nivel de riesgo
     timestamp: Optional[str] = None  # ISO8601 string
 
 # ===== Utils =====
 def now_iso() -> str:
     return dt.datetime.utcnow().isoformat()
 
-def ensure_dir_for(path: str):
-    d = os.path.dirname(path)
-    if d and not os.path.exists(d):
-        os.makedirs(d, exist_ok=True)
-
 def save_event(ev: dict):
-    ensure_dir_for(EVENT_LOG_FILE)
-    with open(EVENT_LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(ev, ensure_ascii=False) + "\n")
-
-def parse_iso(s: str) -> Optional[dt.datetime]:
     try:
-        s2 = s.rstrip("Z")
-        return dt.datetime.fromisoformat(s2)
-    except Exception:
-        return None
+        coll.insert_one(ev)
+    except PyMongoError as e:
+        print(f"⚠ Error guardando evento: {e}")
 
 def load_events(hours: int) -> List[dict]:
     cutoff = dt.datetime.utcnow() - dt.timedelta(hours=max(1, hours))
-    items: List[dict] = []
-    if not os.path.exists(EVENT_LOG_FILE):
-        return items
-    with open(EVENT_LOG_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                e = json.loads(line)
-                ts_s = e.get("timestamp")
-                if not ts_s:
-                    continue
-                ts = parse_iso(ts_s)
-                if ts and ts >= cutoff:
-                    items.append(e)
-            except Exception:
-                continue
-    return items
+    try:
+        return list(coll.find({"timestamp": {"$gte": cutoff.isoformat()}}))
+    except PyMongoError as e:
+        print(f"⚠ Error cargando eventos: {e}")
+        return []
 
+# ===== OpenAI Analyzer =====
 def openai_analyze(events: List[dict]) -> dict:
-    """
-    Llama a /v1/chat/completions y devuelve {score, text}.
-    Fuerza JSON y, si hay error, retorna el body para debug.
-    """
     events_text = "\n".join(
-        f"[{e.get('timestamp')}] {e.get('source')}: {e.get('description')} (valor={e.get('value')})"
+        f"[{e.get('timestamp')}] {e.get('source')}: {e.get('text')} (score={e.get('score')})"
         for e in events
     ) or "(sin eventos)"
 
     system_msg = SYSTEM_PROMPT
-    user_msg   = f"{PROMPT_ANALYSIS}\n\nEventos:\n{events_text}"
+    user_msg = f"{PROMPT_ANALYSIS}\n\nEventos:\n{events_text}"
 
     payload = {
         "model": OPENAI_MODEL,
@@ -140,69 +107,23 @@ def openai_analyze(events: List[dict]) -> dict:
             json=payload,
             timeout=30,
         )
+
         if r.status_code != 200:
-            body = r.text[:800]
-            return {"score": 0.0, "text": f"OpenAI {r.status_code}: {body}"}
+            return {"score": 0.0, "text": f"OpenAI {r.status_code}: {r.text[:200]}"}
 
-        data = r.json()
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except Exception:
-            return {"score": 0.0, "text": f"Respuesta inesperada: {str(data)[:400]}"}
-
-        # Parseo robusto del JSON
+        content = r.json()["choices"][0]["message"]["content"]
         try:
             parsed = json.loads(content)
-        except Exception as e:
+        except Exception:
             m = re.search(r"\{.*\}", content, flags=re.DOTALL)
-            if not m:
-                return {"score": 0.0, "text": f"No vino JSON válido. Raw: {content[:200]}"}
-            try:
-                parsed = json.loads(m.group(0))
-            except Exception:
-                return {"score": 0.0, "text": f"No pude parsear JSON: {e}. Raw: {content[:200]}"}
+            parsed = json.loads(m.group(0)) if m else {"score": 0.0, "text": "Error parseo"}
 
         score = float(parsed.get("score", 0.0))
-        text  = parsed.get("text") or parsed.get("mensaje") or "Sin resumen"
-        if score < 0: score = 0.0
-        if score > 1: score = 1.0
-        return {"score": score, "text": text}
+        text = parsed.get("text") or "Sin resumen"
+        return {"score": max(0.0, min(score, 1.0)), "text": text}
 
     except Exception as e:
         return {"score": 0.0, "text": f"Error analizando: {e}"}
-
-# ===== Limpieza de logs (cada 24h) =====
-def cleanup_logs_once():
-    try:
-        if LOG_CLEAN_DAYS <= 0:
-            return
-        cutoff = dt.datetime.utcnow() - dt.timedelta(days=LOG_CLEAN_DAYS)
-
-        if os.path.isfile(EVENT_LOG_FILE):
-            mtime = dt.datetime.utcfromtimestamp(os.path.getmtime(EVENT_LOG_FILE))
-            if mtime < cutoff:
-                open(EVENT_LOG_FILE, "w").close()
-                print(f"🧹 Truncado {EVENT_LOG_FILE} por antigüedad")
-
-        logs_dir = "logs"
-        if os.path.isdir(logs_dir):
-            for name in os.listdir(logs_dir):
-                p = os.path.join(logs_dir, name)
-                if os.path.isfile(p):
-                    mtime = dt.datetime.utcfromtimestamp(os.path.getmtime(p))
-                    if mtime < cutoff:
-                        os.remove(p)
-                        print(f"🧹 Borrado log viejo: {p}")
-
-    except Exception as e:
-        print(f"⚠ Error cleanup_logs_once: {e}")
-
-def schedule_cleanup_daily():
-    def _loop():
-        while True:
-            cleanup_logs_once()
-            time.sleep(24*3600)
-    threading.Thread(target=_loop, daemon=True).start()
 
 # ===== Endpoints =====
 @app.get("/health")
@@ -219,21 +140,14 @@ def add_event(ev: Event):
 
 @app.get("/events")
 def list_events():
-    rows: List[dict] = []
-    if os.path.exists(EVENT_LOG_FILE):
-        with open(EVENT_LOG_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except Exception:
-                    continue
-    return {"count": len(rows), "items": rows}
+    try:
+        events = list(coll.find({}, sort=[("timestamp", -1)]))
+        return {"count": len(events), "items": events}
+    except PyMongoError as e:
+        return {"count": 0, "items": [], "error": str(e)}
 
 @app.get("/analyze")
-def analyze(hours: int = Query(1, ge=1, le=168, description="Horas hacia atrás a analizar (1..168)")):
+def analyze(hours: int = Query(1, ge=1, le=168)):
     events = load_events(hours)
     if not events:
         return {
@@ -254,8 +168,5 @@ def analyze(hours: int = Query(1, ge=1, le=168, description="Horas hacia atrás 
 
 # ===== Main =====
 if __name__ == "__main__":
-    schedule_cleanup_daily()
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=False)
-
-
