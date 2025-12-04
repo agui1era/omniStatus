@@ -63,6 +63,23 @@ class Event(BaseModel):
 def now_iso() -> str:
     return dt.datetime.utcnow().isoformat()
 
+def parse_iso_dt(value: str) -> Optional[str]:
+    """Parsea fechas ISO8601 flexibles y devuelve string ISO normalizado."""
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # Guardamos en UTC si el timestamp viene con tzinfo
+        if parsed.tzinfo:
+            parsed = parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
+        return parsed.isoformat()
+    except Exception:
+        return None
+
+def serialize_event(doc: dict) -> dict:
+    data = dict(doc)
+    if "_id" in data:
+        data["_id"] = str(data["_id"])
+    return data
+
 def save_event(ev: dict):
     try:
         coll.insert_one(ev)
@@ -139,10 +156,49 @@ def add_event(ev: Event):
     return {"status": "stored"}
 
 @app.get("/events")
-def list_events():
+def list_events(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    source: Optional[str] = None,
+    text: Optional[str] = None,
+    hours: Optional[int] = Query(None, ge=1, le=168),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    mongo_filter = {}
+
+    if hours:
+        cutoff = dt.datetime.utcnow() - dt.timedelta(hours=hours)
+        mongo_filter["timestamp"] = {"$gte": cutoff.isoformat()}
+    else:
+        ts_filter = {}
+        if start:
+            start_iso = parse_iso_dt(start)
+            if not start_iso:
+                return {"count": 0, "items": [], "error": "start inválido (ISO8601)"}
+            ts_filter["$gte"] = start_iso
+        if end:
+            end_iso = parse_iso_dt(end)
+            if not end_iso:
+                return {"count": 0, "items": [], "error": "end inválido (ISO8601)"}
+            ts_filter["$lte"] = end_iso
+        if ts_filter:
+            mongo_filter["timestamp"] = ts_filter
+
+    if source:
+        mongo_filter["source"] = {"$regex": source, "$options": "i"}
+
+    if text:
+        mongo_filter["$or"] = [
+            {"text": {"$regex": text, "$options": "i"}},
+            {"description": {"$regex": text, "$options": "i"}},
+        ]
+
     try:
-        events = list(coll.find({}, sort=[("timestamp", -1)]))
-        return {"count": len(events), "items": events}
+        events = [
+            serialize_event(e)
+            for e in coll.find(mongo_filter, sort=[("timestamp", -1)]).limit(limit)
+        ]
+        return {"count": len(events), "items": events, "applied_filter": mongo_filter}
     except PyMongoError as e:
         return {"count": 0, "items": [], "error": str(e)}
 

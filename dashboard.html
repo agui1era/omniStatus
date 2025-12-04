@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel de Eventos - omniStatus</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #0b1222;
+      --muted: #94a3b8;
+      --accent: #22c55e;
+      --accent-2: #f59e0b;
+      --text: #e2e8f0;
+      --border: #1f2937;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(34, 197, 94, 0.08), transparent 30%),
+                  radial-gradient(circle at 80% 0%, rgba(245, 158, 11, 0.08), transparent 30%),
+                  var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 28px;
+    }
+    h1 { margin: 0 0 12px; font-size: 28px; letter-spacing: -0.02em; }
+    p.lead { margin: 0 0 24px; color: var(--muted); }
+    .layout { max-width: 1200px; margin: 0 auto; }
+    .grid { display: grid; gap: 16px; }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .card {
+      background: linear-gradient(145deg, rgba(255,255,255,0.02), rgba(255,255,255,0.0));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    }
+    .card h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric { font-size: 28px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); }
+    .muted { color: var(--muted); font-size: 13px; }
+    .filters { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0b1426;
+      color: var(--text);
+      font-size: 14px;
+    }
+    input:focus, select:focus { outline: 2px solid rgba(34, 197, 94, 0.4); }
+    .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button {
+      border: 1px solid var(--border);
+      background: #111827;
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+    button:hover { transform: translateY(-1px); border-color: #1f9d5a; }
+    button.primary { background: linear-gradient(135deg, #22c55e, #16a34a); border: none; }
+    button.ghost { background: transparent; }
+    button.active { border-color: #22c55e; color: #22c55e; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: left; font-size: 13px; }
+    th { color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+    tbody tr:hover { background: rgba(255,255,255,0.02); }
+    .tag { padding: 4px 8px; background: rgba(34, 197, 94, 0.15); color: #bbf7d0; border-radius: 999px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+    .tag.warn { background: rgba(245, 158, 11, 0.15); color: #fcd34d; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+    .status-dot.warn { background: var(--accent-2); }
+    .status-dot.err { background: #ef4444; }
+    .table-wrapper { overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: #0b1222; }
+    .hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip { padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); font-size: 12px; cursor: pointer; }
+    .chip.active { border-color: #f59e0b; color: #fbbf24; }
+    .error { color: #fca5a5; margin-top: 6px; font-size: 13px; }
+    @media (max-width: 720px) {
+      body { padding: 18px; }
+      .filter-bar { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <h1>Panel de Eventos</h1>
+    <p class="lead">Consulta rápida a MongoDB con filtros por fecha, hora y login/fuente.</p>
+
+    <div class="card">
+      <div class="filter-bar">
+        <div style="flex: 1; min-width: 240px;">
+          <label>Servidor API</label>
+          <input id="baseUrl" value="http://localhost:8001" placeholder="http://localhost:8001">
+        </div>
+        <div class="chips" aria-label="Ventanas rápidas">
+          <div class="chip active" data-hours="1">Última 1h</div>
+          <div class="chip" data-hours="6">Últimas 6h</div>
+          <div class="chip" data-hours="24">Últimas 24h</div>
+          <div class="chip" data-hours="72">Últimas 72h</div>
+        </div>
+        <button class="primary" id="refreshBtn">Actualizar</button>
+        <button class="ghost" id="autoToggle">Auto (15s)</button>
+      </div>
+      <div class="filters" style="margin-top: 14px;">
+        <div>
+          <label>Inicio (ISO)</label>
+          <input id="start" type="datetime-local">
+          <div class="hint">Se usa si no eliges ventana rápida.</div>
+        </div>
+        <div>
+          <label>Fin (ISO)</label>
+          <input id="end" type="datetime-local">
+        </div>
+        <div>
+          <label>Fuente / login</label>
+          <input id="source" placeholder="cam_entrada o usuario">
+        </div>
+        <div>
+          <label>Texto contiene</label>
+          <input id="search" placeholder="login, error, acceso...">
+        </div>
+        <div>
+          <label>Límite</label>
+          <input id="limit" type="number" min="1" max="1000" value="200">
+        </div>
+      </div>
+      <div id="feedback" class="error"></div>
+    </div>
+
+    <div class="grid cards" style="margin: 16px 0;">
+      <div class="card">
+        <h3>Total</h3>
+        <div class="metric"><span class="status-dot" id="statusDot"></span><span id="total">—</span></div>
+        <div class="muted" id="timeRange">Sin datos</div>
+      </div>
+      <div class="card">
+        <h3>Riesgo promedio</h3>
+        <div class="metric"><span id="avgScore">—</span></div>
+        <div class="muted" id="scoreDetail">Usa campo score o value si existe</div>
+      </div>
+      <div class="card">
+        <h3>Top fuentes/login</h3>
+        <div class="metric" style="font-size:20px;" id="topSources">—</div>
+        <div class="muted">Se muestra el top 3</div>
+      </div>
+      <div class="card">
+        <h3>Último evento</h3>
+        <div class="metric" style="font-size:18px;" id="lastEvent">—</div>
+        <div class="muted" id="lastEventMeta"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="filter-bar" style="margin-bottom: 12px;">
+        <div class="pill" id="countLabel">0 eventos</div>
+        <div class="pill" id="serverLabel">Sin conexión</div>
+        <button class="ghost" id="copyJson">Copiar JSON</button>
+        <button class="ghost" id="clearFilters">Limpiar filtros</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Fuente/Login</th>
+              <th>Texto</th>
+              <th>Score/Valor</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr><td colspan="4" class="muted">Carga inicial...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const chips = document.querySelectorAll(".chip");
+    const feedback = document.getElementById("feedback");
+    const baseUrlInput = document.getElementById("baseUrl");
+    const startInput = document.getElementById("start");
+    const endInput = document.getElementById("end");
+    const sourceInput = document.getElementById("source");
+    const searchInput = document.getElementById("search");
+    const limitInput = document.getElementById("limit");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const autoToggle = document.getElementById("autoToggle");
+    const tableBody = document.getElementById("tableBody");
+    const countLabel = document.getElementById("countLabel");
+    const serverLabel = document.getElementById("serverLabel");
+    const statusDot = document.getElementById("statusDot");
+    const topSources = document.getElementById("topSources");
+    const avgScore = document.getElementById("avgScore");
+    const scoreDetail = document.getElementById("scoreDetail");
+    const lastEvent = document.getElementById("lastEvent");
+    const lastEventMeta = document.getElementById("lastEventMeta");
+    const timeRange = document.getElementById("timeRange");
+    const copyJson = document.getElementById("copyJson");
+    const clearFiltersBtn = document.getElementById("clearFilters");
+
+    let activeHours = 1;
+    let autoInterval = null;
+    let latestPayload = [];
+
+    chips.forEach(chip => {
+      chip.addEventListener("click", () => {
+        chips.forEach(c => c.classList.remove("active"));
+        chip.classList.add("active");
+        activeHours = Number(chip.dataset.hours);
+        startInput.value = "";
+        endInput.value = "";
+        loadEvents();
+      });
+    });
+
+    [startInput, endInput].forEach(inp => inp.addEventListener("change", () => {
+      chips.forEach(c => c.classList.remove("active"));
+      activeHours = null;
+    }));
+
+    refreshBtn.addEventListener("click", loadEvents);
+
+    autoToggle.addEventListener("click", () => {
+      if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        autoToggle.classList.remove("active");
+        autoToggle.textContent = "Auto (15s)";
+      } else {
+        autoInterval = setInterval(loadEvents, 15000);
+        autoToggle.classList.add("active");
+        autoToggle.textContent = "Auto ON";
+      }
+    });
+
+    copyJson.addEventListener("click", () => {
+      navigator.clipboard.writeText(JSON.stringify(latestPayload, null, 2))
+        .then(() => notify("JSON copiado", false))
+        .catch(() => notify("No se pudo copiar", true));
+    });
+
+    clearFiltersBtn.addEventListener("click", () => {
+      startInput.value = "";
+      endInput.value = "";
+      sourceInput.value = "";
+      searchInput.value = "";
+      limitInput.value = 200;
+      chips.forEach(c => c.classList.remove("active"));
+      chips[0].classList.add("active");
+      activeHours = 1;
+      loadEvents();
+    });
+
+    function buildParams() {
+      const params = new URLSearchParams();
+      const limit = Number(limitInput.value) || 200;
+      params.set("limit", Math.min(Math.max(limit, 1), 1000));
+
+      const baseStart = startInput.value ? new Date(startInput.value).toISOString() : "";
+      const baseEnd = endInput.value ? new Date(endInput.value).toISOString() : "";
+
+      if (activeHours) {
+        params.set("hours", activeHours);
+      } else {
+        if (baseStart) params.set("start", baseStart);
+        if (baseEnd) params.set("end", baseEnd);
+      }
+
+      const source = sourceInput.value.trim();
+      const text = searchInput.value.trim();
+      if (source) params.set("source", source);
+      if (text) params.set("text", text);
+
+      return params;
+    }
+
+    async function loadEvents() {
+      feedback.textContent = "";
+      statusDot.className = "status-dot";
+      const base = (baseUrlInput.value || "http://localhost:8001").replace(/\\/$/, "");
+      serverLabel.textContent = "Consultando...";
+
+      try {
+        const url = base + "/events?" + buildParams().toString();
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+
+        const data = await res.json();
+        const items = data.items || [];
+        latestPayload = items;
+
+        renderTable(items);
+        renderStats(items);
+        countLabel.textContent = `${items.length} evento(s)`;
+        serverLabel.textContent = base;
+        statusDot.className = "status-dot";
+      } catch (e) {
+        feedback.textContent = "Error consultando API: " + e.message;
+        tableBody.innerHTML = '<tr><td colspan="4" class="muted">Sin datos</td></tr>';
+        statusDot.className = "status-dot err";
+        serverLabel.textContent = "Error";
+      }
+    }
+
+    function renderTable(items) {
+      if (!items.length) {
+        tableBody.innerHTML = '<tr><td colspan="4" class="muted">No hay eventos con los filtros actuales.</td></tr>';
+        return;
+      }
+
+      tableBody.innerHTML = items.map(ev => {
+        const ts = formatDate(ev.timestamp || ev.ts);
+        const src = ev.source || ev.login || "—";
+        const text = ev.text || ev.description || ev.msg || "—";
+        const score = ev.score ?? ev.value ?? "—";
+        const tagClass = typeof score === "number" && score >= 0.6 ? "tag warn" : "tag";
+        const scoreText = typeof score === "number" ? score.toFixed(2) : score;
+
+        return `
+          <tr>
+            <td>${ts}</td>
+            <td><span class="tag ${tagClass.includes("warn") ? "warn" : ""}"><span class="status-dot ${tagClass.includes("warn") ? "warn" : ""}"></span>${escapeHtml(src)}</span></td>
+            <td>${escapeHtml(text)}</td>
+            <td>${scoreText}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderStats(items) {
+      if (!items.length) {
+        avgScore.textContent = "—";
+        topSources.textContent = "—";
+        lastEvent.textContent = "—";
+        lastEventMeta.textContent = "";
+        timeRange.textContent = "Sin datos";
+        scoreDetail.textContent = "Usa campo score o value si existe";
+        return;
+      }
+
+      const scores = items
+        .map(i => (typeof i.score === "number" ? i.score : (typeof i.value === "number" ? i.value : null)))
+        .filter(v => v !== null);
+      const avg = scores.length ? (scores.reduce((a,b)=>a+b,0) / scores.length) : null;
+      avgScore.textContent = avg !== null ? avg.toFixed(2) : "s/d";
+      scoreDetail.textContent = `${scores.length} eventos con score/valor`;
+
+      const counts = {};
+      items.forEach(i => {
+        const key = (i.source || i.login || "desconocido").toLowerCase();
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      const top = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3);
+      topSources.textContent = top.map(([k,v]) => `${k} (${v})`).join(" · ") || "—";
+
+      const last = items[0];
+      lastEvent.textContent = escapeHtml(last.text || last.description || last.msg || "—");
+      lastEventMeta.textContent = `${formatDate(last.timestamp || last.ts)} · ${last.source || last.login || "—"}`;
+
+      const firstTs = formatDate(items[items.length - 1].timestamp || items[items.length - 1].ts);
+      const lastTs = formatDate(last.timestamp || last.ts);
+      timeRange.textContent = `De ${firstTs} a ${lastTs}`;
+    }
+
+    function formatDate(value) {
+      if (!value) return "—";
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return value;
+      return d.toLocaleString();
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function notify(msg, isError) {
+      feedback.textContent = msg;
+      feedback.style.color = isError ? "#fca5a5" : "#22c55e";
+      setTimeout(() => {
+        feedback.textContent = "";
+        feedback.style.color = "#fca5a5";
+      }, 2200);
+    }
+
+    loadEvents();
+  </script>
+</body>
+</html>
