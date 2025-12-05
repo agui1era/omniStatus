@@ -6,40 +6,40 @@ import random
 import subprocess
 import requests
 import re
-from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
-from pymongo import MongoClient
 from difflib import SequenceMatcher
+from pymongo import MongoClient
+from app.config import settings
 
-load_dotenv()
+# ===== Config (Using Centralized Settings) =====
+# Note: Consumer is still sync for now, so we use standard pymongo/requests
+# but we pull values from settings to avoid duplication.
+OPENAI_API_KEY = settings.OPENAI_API_KEY
+OPENAI_MODEL = settings.OPENAI_MODEL
+PROMPT_ANALYSIS = settings.PROMPT_ANALYSIS
 
-# ===== Config =====
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
-PROMPT_ANALYSIS = os.getenv("PROMPT_ANALYSIS")
-
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB = os.getenv("MONGO_DB_NAME", "omniguard")
-MONGO_COLLECTION = os.getenv("MONGO_COLL_NAME", "eventos")
+MONGO_URI = settings.MONGO_URI
+MONGO_DB = settings.MONGO_DB_NAME
+MONGO_COLLECTION = settings.MONGO_COLL_NAME
 
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client[MONGO_DB]
 col = db[MONGO_COLLECTION]
 
-ALERT_SCORE_THRESHOLD = float(os.getenv("ALERT_SCORE_THRESHOLD", 0.5))
-WINDOW_SECONDS = int(os.getenv("WINDOW_SECONDS", 300))
-ANALYZE_INTERVAL = int(os.getenv("ANALYZE_INTERVAL", 300))
+ALERT_SCORE_THRESHOLD = settings.ALERT_SCORE_THRESHOLD
+WINDOW_SECONDS = settings.WINDOW_SECONDS
+ANALYZE_INTERVAL = settings.ANALYZE_INTERVAL
 
-ENABLE_TELEGRAM = os.getenv("ENABLE_TELEGRAM", "0") == "1"
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+ENABLE_TELEGRAM = settings.ENABLE_TELEGRAM == 1
+TELEGRAM_BOT_TOKEN = settings.TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID = settings.TELEGRAM_CHAT_ID
 
-ENABLE_TTS = os.getenv("ENABLE_TTS", "0") == "1"
-TTS_URL = os.getenv("TTS_URL", "https://api.openai.com/v1/audio/speech")
-TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
-TTS_VOICE = os.getenv("TTS_VOICE", "verse")
-TTS_OUTPUT = os.getenv("TTS_OUTPUT", "alerta.mp3")
-TTS_MESSAGE = os.getenv("TTS_MESSAGE", "Se ha detectado una alerta de seguridad")
+ENABLE_TTS = settings.ENABLE_TTS == 1
+TTS_URL = settings.TTS_URL
+TTS_MODEL = settings.TTS_MODEL
+TTS_VOICE = settings.TTS_VOICE
+TTS_OUTPUT = settings.TTS_OUTPUT
+TTS_MESSAGE = settings.TTS_MESSAGE
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +47,24 @@ logging.basicConfig(
 )
 
 # =========================================================
-# 🔁 RETRIES (FALTABA ESTE BLOQUE — AHORA SÍ!)
+# 🔐 Config Validation
+# =========================================================
+def validate_config():
+    missing = []
+    if not OPENAI_API_KEY:
+        missing.append("OPENAI_API_KEY")
+    if not PROMPT_ANALYSIS:
+        missing.append("PROMPT_ANALYSIS")
+    if ENABLE_TELEGRAM:
+        if not TELEGRAM_BOT_TOKEN:
+            missing.append("TELEGRAM_BOT_TOKEN")
+        if not TELEGRAM_CHAT_ID:
+            missing.append("TELEGRAM_CHAT_ID")
+    if missing:
+        raise SystemExit(f"Missing required environment variables: {', '.join(missing)}")
+
+# =========================================================
+# 🔁 RETRIES (WITH EXPONENTIAL BACKOFF)
 # =========================================================
 def with_retries(request_fn, max_attempts=3, base_delay=1.0, max_delay=30.0):
     attempt = 0
@@ -75,14 +92,14 @@ def with_retries(request_fn, max_attempts=3, base_delay=1.0, max_delay=30.0):
             sleep_s *= (0.5 + random.random())
 
             logging.warning(
-                f"[RETRY] Intento {attempt}/{max_attempts} (status={status}). Reintentando en {sleep_s:.2f}s…"
+                f"[RETRY] Attempt {attempt}/{max_attempts} (status={status}). Retrying in {sleep_s:.2f}s…"
             )
 
             time.sleep(sleep_s)
 
 
 # =========================================================
-# 🔍 Normalización de textos
+# 🔍 Text Normalization
 # =========================================================
 def normalize_text(s):
     if not isinstance(s, str):
@@ -125,38 +142,29 @@ def group_similar_events(events, threshold=0.95):
         g.pop("norm", None)
     return groups
 
-
 # =========================================================
-# 🔐 Validación config
-# =========================================================
-def validate_config():
-    missing = []
-    if not OPENAI_API_KEY:
-        missing.append("OPENAI_API_KEY")
-    if not PROMPT_ANALYSIS:
-        missing.append("PROMPT_ANALYSIS")
-    if ENABLE_TELEGRAM:
-        if not TELEGRAM_BOT_TOKEN:
-            missing.append("TELEGRAM_BOT_TOKEN")
-        if not TELEGRAM_CHAT_ID:
-            missing.append("TELEGRAM_CHAT_ID")
-    if missing:
-        raise SystemExit(f"Faltan variables de entorno requeridas: {', '.join(missing)}")
-
-
-# =========================================================
-# 🗂 Leer eventos Mongo
+# 🗂 Read Mongo Events
 # =========================================================
 def read_events(window_seconds=None):
     effective_window = WINDOW_SECONDS if window_seconds is None else window_seconds
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=effective_window)
-    docs = col.find({"timestamp": {"$gte": cutoff.isoformat()}}).sort("timestamp", 1)
+    ts_filter = {
+        "$or": [
+            {"timestamp": {"$gte": cutoff}},
+            {"timestamp": {"$gte": cutoff.isoformat()}},
+        ]
+    }
+    docs = col.find(ts_filter).sort("timestamp", 1)
 
     events = []
     for doc in docs:
         ts = doc.get("timestamp")
         if isinstance(ts, str):
             ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            else:
+                ts = ts.astimezone(timezone.utc)
         elif isinstance(ts, datetime):
             ts = ts.astimezone(timezone.utc)
         else:
@@ -174,7 +182,7 @@ def read_events(window_seconds=None):
 # =========================================================
 def analyze(events):
     if not events:
-        return {"score": 0.0, "text": "Sin eventos recientes."}
+        return {"score": 0.0, "text": "No recent events."}
 
     payload = {
         "prompt": PROMPT_ANALYSIS,
@@ -192,7 +200,7 @@ def analyze(events):
     req_body = {
         "model": OPENAI_MODEL,
         "messages": [
-            {"role": "system", "content": "Eres un sistema experto en monitoreo. Responde en JSON válido."},
+            {"role": "system", "content": "You are an expert monitoring system. Respond in valid JSON."},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
         ],
         "temperature": 0.2,
@@ -217,7 +225,7 @@ def analyze(events):
         return json.loads(content)
 
     except Exception as e:
-        logging.error(f"Error analizando: {e}")
+        logging.error(f"Analysis error: {e}")
         return {"score": 0.0, "text": f"Error: {e}"}
 
 
@@ -234,9 +242,9 @@ def send_telegram(msg):
             return requests.post(url, data=data, timeout=10)
         r = with_retries(_r)
         if not r.ok:
-            logging.warning(f"Telegram respondió {r.status_code}: {r.text[:200]}")
+            logging.warning(f"Telegram responded {r.status_code}: {r.text[:200]}")
     except Exception as e:
-        logging.error(f"Error enviando Telegram: {e}")
+        logging.error(f"Error sending Telegram: {e}")
 
 
 # =========================================================
@@ -259,7 +267,7 @@ def speak_text(text):
 
         subprocess.run(["afplay", TTS_OUTPUT], check=False)
     except Exception as e:
-        logging.error(f"Error en TTS: {e}")
+        logging.error(f"TTS error: {e}")
 
 
 # =========================================================
@@ -267,13 +275,13 @@ def speak_text(text):
 # =========================================================
 def main():
     validate_config()
-    logging.info(f"Consumer online (umbral {ALERT_SCORE_THRESHOLD})")
+    logging.info(f"Consumer online (threshold {ALERT_SCORE_THRESHOLD})")
 
     initial = group_similar_events(read_events(3600))
     res = analyze(initial)
 
     if res.get("score", 0) >= ALERT_SCORE_THRESHOLD:
-        send_telegram(f"🚨 ALERTA INICIAL\n{res.get('text')}")
+        send_telegram(f"🚨 INITIAL ALERT\n{res.get('text')}")
         speak_text(res.get("text"))
 
     while True:
@@ -286,7 +294,7 @@ def main():
         logging.info(f"Score={score:.2f} | Msg={msg}")
 
         if score >= ALERT_SCORE_THRESHOLD:
-            send_telegram(f"🚨 ALERTA\n{msg}")
+            send_telegram(f"🚨 ALERT\n{msg}")
             speak_text(msg)
 
         time.sleep(ANALYZE_INTERVAL)

@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Panel de Eventos - omniStatus</title>
+  <title>Events Dashboard - omniStatus</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -79,9 +79,7 @@
     .status-dot.err { background: #ef4444; }
     .table-wrapper { overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: #0b1222; }
     .hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
-    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-    .chip { padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); font-size: 12px; cursor: pointer; }
-    .chip.active { border-color: #f59e0b; color: #fbbf24; }
+    .search-inline { flex: 1; min-width: 200px; }
     .error { color: #fca5a5; margin-top: 6px; font-size: 13px; }
     @media (max-width: 720px) {
       body { padding: 18px; }
@@ -91,44 +89,47 @@
 </head>
 <body>
   <div class="layout">
-    <h1>Panel de Eventos</h1>
-    <p class="lead">Consulta rápida a MongoDB con filtros por fecha, hora y login/fuente.</p>
+    <h1>Events Dashboard</h1>
+    <p class="lead">Quick queries with filters by date, time, and text.</p>
 
     <div class="card">
       <div class="filter-bar">
         <div style="flex: 1; min-width: 240px;">
-          <label>Servidor API</label>
+          <label>API Server</label>
           <input id="baseUrl" value="http://localhost:8001" placeholder="http://localhost:8001">
         </div>
-        <div class="chips" aria-label="Ventanas rápidas">
-          <div class="chip active" data-hours="1">Última 1h</div>
-          <div class="chip" data-hours="6">Últimas 6h</div>
-          <div class="chip" data-hours="24">Últimas 24h</div>
-          <div class="chip" data-hours="72">Últimas 72h</div>
+        <div style="flex: 1; min-width: 200px;">
+          <label>API Key (X-API-Key)</label>
+          <input id="apiKey" value="" placeholder="optional">
+          <div class="hint">Use if API_TOKEN is set on the server.</div>
         </div>
-        <button class="primary" id="refreshBtn">Actualizar</button>
+        <button class="primary" id="refreshBtn">Refresh</button>
         <button class="ghost" id="autoToggle">Auto (15s)</button>
+        <div style="min-width: 160px;">
+          <label>View</label>
+          <select id="viewMode">
+            <option value="table">Table</option>
+            <option value="summary3h">3h summary</option>
+            <option value="summaryDay">Daily summary</option>
+          </select>
+        </div>
       </div>
       <div class="filters" style="margin-top: 14px;">
         <div>
-          <label>Inicio (ISO)</label>
+          <label>Start (ISO)</label>
           <input id="start" type="datetime-local">
-          <div class="hint">Se usa si no eliges ventana rápida.</div>
+          <div class="hint">Used if no quick window is chosen.</div>
         </div>
         <div>
-          <label>Fin (ISO)</label>
+          <label>End (ISO)</label>
           <input id="end" type="datetime-local">
         </div>
         <div>
-          <label>Fuente / login</label>
-          <input id="source" placeholder="cam_entrada o usuario">
+          <label>Text contains</label>
+          <input id="search" placeholder="login, error, access...">
         </div>
         <div>
-          <label>Texto contiene</label>
-          <input id="search" placeholder="login, error, acceso...">
-        </div>
-        <div>
-          <label>Límite</label>
+          <label>Limit</label>
           <input id="limit" type="number" min="1" max="1000" value="200">
         </div>
       </div>
@@ -139,44 +140,34 @@
       <div class="card">
         <h3>Total</h3>
         <div class="metric"><span class="status-dot" id="statusDot"></span><span id="total">—</span></div>
-        <div class="muted" id="timeRange">Sin datos</div>
+        <div class="muted" id="timeRange">No data</div>
       </div>
       <div class="card">
-        <h3>Riesgo promedio</h3>
+        <h3>Avg risk</h3>
         <div class="metric"><span id="avgScore">—</span></div>
-        <div class="muted" id="scoreDetail">Usa campo score o value si existe</div>
-      </div>
-      <div class="card">
-        <h3>Top fuentes/login</h3>
-        <div class="metric" style="font-size:20px;" id="topSources">—</div>
-        <div class="muted">Se muestra el top 3</div>
-      </div>
-      <div class="card">
-        <h3>Último evento</h3>
-        <div class="metric" style="font-size:18px;" id="lastEvent">—</div>
-        <div class="muted" id="lastEventMeta"></div>
+        <div class="muted" id="scoreDetail">Uses score/value when present</div>
       </div>
     </div>
 
     <div class="card">
       <div class="filter-bar" style="margin-bottom: 12px;">
-        <div class="pill" id="countLabel">0 eventos</div>
-        <div class="pill" id="serverLabel">Sin conexión</div>
-        <button class="ghost" id="copyJson">Copiar JSON</button>
-        <button class="ghost" id="clearFilters">Limpiar filtros</button>
+        <div class="pill" id="countLabel">0 events</div>
+        <div class="pill" id="serverLabel">No connection</div>
+        <button class="ghost" id="copyJson">Copy JSON</button>
+        <button class="ghost" id="clearFilters">Clear filters</button>
       </div>
       <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>Timestamp</th>
-              <th>Fuente/Login</th>
-              <th>Texto</th>
-              <th>Score/Valor</th>
+              <th>Source/Login</th>
+              <th>Text</th>
+              <th>Score/Value</th>
             </tr>
           </thead>
           <tbody id="tableBody">
-            <tr><td colspan="4" class="muted">Carga inicial...</td></tr>
+            <tr><td colspan="4" class="muted">Initial load...</td></tr>
           </tbody>
         </table>
       </div>
@@ -184,48 +175,30 @@
   </div>
 
   <script>
-    const chips = document.querySelectorAll(".chip");
     const feedback = document.getElementById("feedback");
     const baseUrlInput = document.getElementById("baseUrl");
+    const apiKeyInput = document.getElementById("apiKey");
     const startInput = document.getElementById("start");
     const endInput = document.getElementById("end");
-    const sourceInput = document.getElementById("source");
     const searchInput = document.getElementById("search");
     const limitInput = document.getElementById("limit");
     const refreshBtn = document.getElementById("refreshBtn");
     const autoToggle = document.getElementById("autoToggle");
     const tableBody = document.getElementById("tableBody");
+    const tableHead = document.querySelector("table thead tr");
+    const viewModeSelect = document.getElementById("viewMode");
     const countLabel = document.getElementById("countLabel");
     const serverLabel = document.getElementById("serverLabel");
     const statusDot = document.getElementById("statusDot");
-    const topSources = document.getElementById("topSources");
     const avgScore = document.getElementById("avgScore");
     const scoreDetail = document.getElementById("scoreDetail");
-    const lastEvent = document.getElementById("lastEvent");
-    const lastEventMeta = document.getElementById("lastEventMeta");
     const timeRange = document.getElementById("timeRange");
     const copyJson = document.getElementById("copyJson");
     const clearFiltersBtn = document.getElementById("clearFilters");
 
-    let activeHours = 1;
     let autoInterval = null;
     let latestPayload = [];
-
-    chips.forEach(chip => {
-      chip.addEventListener("click", () => {
-        chips.forEach(c => c.classList.remove("active"));
-        chip.classList.add("active");
-        activeHours = Number(chip.dataset.hours);
-        startInput.value = "";
-        endInput.value = "";
-        loadEvents();
-      });
-    });
-
-    [startInput, endInput].forEach(inp => inp.addEventListener("change", () => {
-      chips.forEach(c => c.classList.remove("active"));
-      activeHours = null;
-    }));
+    let viewMode = "table"; // table | summary3h | summaryDay
 
     refreshBtn.addEventListener("click", loadEvents);
 
@@ -244,19 +217,21 @@
 
     copyJson.addEventListener("click", () => {
       navigator.clipboard.writeText(JSON.stringify(latestPayload, null, 2))
-        .then(() => notify("JSON copiado", false))
-        .catch(() => notify("No se pudo copiar", true));
+        .then(() => notify("JSON copied", false))
+        .catch(() => notify("Copy failed", true));
+    });
+
+    searchInput.addEventListener("input", () => renderView(latestPayload));
+    viewModeSelect.addEventListener("change", () => {
+      viewMode = viewModeSelect.value;
+      loadEvents();
     });
 
     clearFiltersBtn.addEventListener("click", () => {
       startInput.value = "";
       endInput.value = "";
-      sourceInput.value = "";
       searchInput.value = "";
       limitInput.value = 200;
-      chips.forEach(c => c.classList.remove("active"));
-      chips[0].classList.add("active");
-      activeHours = 1;
       loadEvents();
     });
 
@@ -268,16 +243,10 @@
       const baseStart = startInput.value ? new Date(startInput.value).toISOString() : "";
       const baseEnd = endInput.value ? new Date(endInput.value).toISOString() : "";
 
-      if (activeHours) {
-        params.set("hours", activeHours);
-      } else {
-        if (baseStart) params.set("start", baseStart);
-        if (baseEnd) params.set("end", baseEnd);
-      }
+      if (baseStart) params.set("start", baseStart);
+      if (baseEnd) params.set("end", baseEnd);
 
-      const source = sourceInput.value.trim();
       const text = searchInput.value.trim();
-      if (source) params.set("source", source);
       if (text) params.set("text", text);
 
       return params;
@@ -286,44 +255,94 @@
     async function loadEvents() {
       feedback.textContent = "";
       statusDot.className = "status-dot";
-      const base = (baseUrlInput.value || "http://localhost:8001").replace(/\\/$/, "");
+      const base = (baseUrlInput.value || "http://localhost:8001").replace(/\/$/, "");
       serverLabel.textContent = "Consultando...";
+      feedback.textContent = "";
 
       try {
-        const url = base + "/events?" + buildParams().toString();
-        const res = await fetch(url);
+        let url = base + "/events?" + buildParams().toString();
+        if (viewMode === "summary3h") {
+          url = base + "/events/summary/3h?limit=" + encodeURIComponent(limitInput.value || 200);
+        } else if (viewMode === "summaryDay") {
+          url = base + "/events/summary/day?limit=" + encodeURIComponent(limitInput.value || 200);
+        }
+
+        const headers = {};
+        const apiKey = apiKeyInput.value.trim();
+        if (apiKey) headers["X-API-Key"] = apiKey;
+
+        const res = await fetch(url, { headers });
         if (!res.ok) throw new Error("HTTP " + res.status);
 
         const data = await res.json();
         const items = data.items || [];
         latestPayload = items;
 
-        renderTable(items);
+        renderView(items);
         renderStats(items);
-        countLabel.textContent = `${items.length} evento(s)`;
+        countLabel.textContent = `${items.length} event(s)`;
         serverLabel.textContent = base;
         statusDot.className = "status-dot";
       } catch (e) {
-        feedback.textContent = "Error consultando API: " + e.message;
-        tableBody.innerHTML = '<tr><td colspan="4" class="muted">Sin datos</td></tr>';
+        feedback.textContent = "API error: " + e.message;
+        tableBody.innerHTML = '<tr><td colspan="4" class="muted">No data</td></tr>';
         statusDot.className = "status-dot err";
         serverLabel.textContent = "Error";
       }
     }
 
+    function renderView(items) {
+      const filtered = filterQuick(items);
+      if (viewMode === "table") {
+        setTableHeader(["Timestamp", "Source/Login", "Text", "Score/Value"]);
+        renderTable(filtered);
+      } else if (viewMode === "summary3h") {
+        setTableHeader(["Period/Timestamp", "Type", "Text", "Hash", "Score/Value"]);
+        renderSummary3h(filtered);
+      } else if (viewMode === "summaryDay") {
+        setTableHeader(["Date/Timestamp", "Type", "Text", "Hash", "Score/Value"]);
+        renderSummaryDay(filtered);
+      }
+    }
+
+    function filterQuick(items) {
+      const q = searchInput.value.trim().toLowerCase();
+      if (!q) return items;
+      return items.filter(ev => {
+        const str = [
+          ev.source, ev.login, ev.text, ev.description, ev.msg, ev.timestamp
+        ].filter(Boolean).join(" ").toLowerCase();
+        return str.includes(q);
+      });
+    }
+
+    function filterByHours(items, hours) {
+      const now = Date.now();
+      const cutoff = now - hours * 3600 * 1000;
+      return items.filter(ev => {
+        const ts = new Date(ev.timestamp || ev.ts).getTime();
+        return !isNaN(ts) && ts >= cutoff;
+      });
+    }
+
+    function setTableHeader(cols) {
+      tableHead.innerHTML = cols.map(c => `<th>${c}</th>`).join("");
+    }
+
     function renderTable(items) {
       if (!items.length) {
-        tableBody.innerHTML = '<tr><td colspan="4" class="muted">No hay eventos con los filtros actuales.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="4" class="muted">No events with the current filters.</td></tr>';
         return;
       }
 
       tableBody.innerHTML = items.map(ev => {
         const ts = formatDate(ev.timestamp || ev.ts);
         const src = ev.source || ev.login || "—";
-        const text = ev.text || ev.description || ev.msg || "—";
+        const text = ev.text || ev.texto || ev.description || ev.msg || "—";
         const score = ev.score ?? ev.value ?? "—";
-        const tagClass = typeof score === "number" && score >= 0.6 ? "tag warn" : "tag";
-        const scoreText = typeof score === "number" ? score.toFixed(2) : score;
+        const numericScore = typeof score === "number" ? score : null;
+        const tagClass = numericScore !== null && numericScore >= 0.6 ? "tag warn" : "tag";
+        const scoreText = numericScore !== null ? numericScore.toFixed(2) : score;
 
         return `
           <tr>
@@ -336,14 +355,65 @@
       }).join("");
     }
 
+    function renderSummary3h(items) {
+      if (!items.length) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="muted">No events with the current filters.</td></tr>';
+        return;
+      }
+
+      const rows = items.map(ev => {
+        const period = ev.period || ev.timestamp || ev.date || "—";
+        const tipo = ev.tipo || ev.type || "—";
+        const texto = ev.text || ev.texto || ev.descripcion || ev.msg || ev.summary || "—";
+        const hash = ev.events_hash || ev.hash || "—";
+        const score = ev.score ?? ev.value ?? ev.valor ?? ev.promedio ?? "—";
+        const scoreText = typeof score === "number" ? score.toFixed(2) : score;
+        return `
+          <tr>
+            <td>${escapeHtml(period)}</td>
+            <td>${escapeHtml(tipo)}</td>
+            <td>${escapeHtml(texto)}</td>
+            <td>${escapeHtml(hash)}</td>
+            <td>${escapeHtml(scoreText)}</td>
+          </tr>
+        `;
+      }).join("");
+
+      tableBody.innerHTML = rows || '<tr><td colspan="5" class="muted">No data</td></tr>';
+    }
+
+    function renderSummaryDay(items) {
+      if (!items.length) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="muted">No events with the current filters.</td></tr>';
+        return;
+      }
+
+      const rows = items.map(ev => {
+        const fecha = ev.date || (ev.timestamp ? (ev.timestamp.slice(0,10)) : "—");
+        const tipo = ev.tipo || ev.type || "—";
+        const texto = ev.text || ev.texto || ev.descripcion || ev.msg || ev.summary || "—";
+        const hash = ev.events_hash || ev.hash || "—";
+        const score = ev.score ?? ev.value ?? ev.valor ?? ev.promedio ?? "—";
+        const scoreText = typeof score === "number" ? score.toFixed(2) : score;
+        return `
+          <tr>
+            <td>${escapeHtml(fecha)}</td>
+            <td>${escapeHtml(tipo)}</td>
+            <td>${escapeHtml(texto)}</td>
+            <td>${escapeHtml(hash)}</td>
+            <td>${escapeHtml(scoreText)}</td>
+          </tr>
+        `;
+      }).join("");
+
+      tableBody.innerHTML = rows || '<tr><td colspan="5" class="muted">No data</td></tr>';
+    }
+
     function renderStats(items) {
       if (!items.length) {
         avgScore.textContent = "—";
-        topSources.textContent = "—";
-        lastEvent.textContent = "—";
-        lastEventMeta.textContent = "";
-        timeRange.textContent = "Sin datos";
-        scoreDetail.textContent = "Usa campo score o value si existe";
+        timeRange.textContent = "No data";
+        scoreDetail.textContent = "Uses score/value when present";
         return;
       }
 
@@ -352,30 +422,20 @@
         .filter(v => v !== null);
       const avg = scores.length ? (scores.reduce((a,b)=>a+b,0) / scores.length) : null;
       avgScore.textContent = avg !== null ? avg.toFixed(2) : "s/d";
-      scoreDetail.textContent = `${scores.length} eventos con score/valor`;
-
-      const counts = {};
-      items.forEach(i => {
-        const key = (i.source || i.login || "desconocido").toLowerCase();
-        counts[key] = (counts[key] || 0) + 1;
-      });
-      const top = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3);
-      topSources.textContent = top.map(([k,v]) => `${k} (${v})`).join(" · ") || "—";
+      scoreDetail.textContent = `${scores.length} events with score/value`;
 
       const last = items[0];
-      lastEvent.textContent = escapeHtml(last.text || last.description || last.msg || "—");
-      lastEventMeta.textContent = `${formatDate(last.timestamp || last.ts)} · ${last.source || last.login || "—"}`;
-
       const firstTs = formatDate(items[items.length - 1].timestamp || items[items.length - 1].ts);
       const lastTs = formatDate(last.timestamp || last.ts);
-      timeRange.textContent = `De ${firstTs} a ${lastTs}`;
+      timeRange.textContent = `From ${firstTs} to ${lastTs}`;
     }
 
     function formatDate(value) {
       if (!value) return "—";
       const d = new Date(value);
       if (isNaN(d.getTime())) return value;
-      return d.toLocaleString();
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
     function escapeHtml(str) {
@@ -395,6 +455,11 @@
         feedback.style.color = "#fca5a5";
       }, 2200);
     }
+
+    window.addEventListener("error", (e) => {
+      feedback.textContent = "Error JS: " + e.message;
+      feedback.style.color = "#fca5a5";
+    });
 
     loadEvents();
   </script>
