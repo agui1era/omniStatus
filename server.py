@@ -447,4 +447,4 @@ def analyze(_: bool = Depends(require_api_key), hours: int = Query(1, ge=1, le=1
 # ===== Main =====
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server_eventos:app", host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=False)
