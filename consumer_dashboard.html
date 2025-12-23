@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OmniStatus Consumer Dashboard</title>
+    <!-- Flatpickr -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" type="text/css" href="https://npmcdn.com/flatpickr/dist/themes/dark.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+    <style>
+      :root {
+        --bg-color: #0f172a;
+        --text-color: #e2e8f0;
+        --card-bg: #1e293b;
+        --accent: #38bdf8;
+        --border: #334155;
+        --success: #22c55e;
+        --danger: #ef4444;
+      }
+
+      body {
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        margin: 0;
+        padding: 20px;
+        line-height: 1.5;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      h1,
+      h2 {
+        font-weight: 300;
+        letter-spacing: -0.025em;
+      }
+
+      h1 {
+        margin-bottom: 30px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+      }
+
+      .controls {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+        background: var(--card-bg);
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        align-items: center;
+      }
+
+      label {
+        color: #94a3b8;
+        font-size: 0.9rem;
+        margin-right: 5px;
+      }
+
+      /* Flatpickr input styling */
+      input.flatpickr-input {
+        background: #0f172a;
+        border: 1px solid var(--border);
+        color: white;
+        padding: 8px;
+        border-radius: 4px;
+        font-family: inherit;
+        width: 200px;
+      }
+
+      button {
+        background-color: var(--accent);
+        color: #0f172a;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.2s;
+      }
+
+      button:hover {
+        opacity: 0.9;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      button.secondary {
+        background-color: var(--border);
+        color: var(--text-color);
+      }
+      button.success {
+        background-color: var(--success);
+        color: white;
+      }
+
+      .main-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 20px;
+      }
+
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+        height: fit-content;
+      }
+
+      .event-list {
+        max-height: 600px;
+        overflow-y: auto;
+        margin-top: 15px;
+      }
+
+      .event-item {
+        background: #0f172a;
+        padding: 10px;
+        margin-bottom: 8px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        font-size: 0.9rem;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+
+      .event-check {
+        margin-top: 4px;
+      }
+
+      .event-content {
+        flex: 1;
+      }
+      .event-meta {
+        display: flex;
+        justify-content: space-between;
+        color: #64748b;
+        font-size: 0.8rem;
+        margin-top: 4px;
+      }
+
+      .badge {
+        background: #334155;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+      }
+
+      textarea {
+        width: 100%;
+        height: 500px; /* Increased height */
+        background: #0f172a;
+        border: 1px solid var(--border);
+        color: var(--text-color);
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 10px;
+        font-family: monospace;
+        resize: vertical;
+        font-size: 0.9rem;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      #status {
+        margin-left: auto;
+        font-size: 0.9rem;
+      }
+      .loading {
+        color: var(--accent);
+      }
+      .error {
+        color: var(--danger);
+      }
+      .ok {
+        color: var(--success);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>OmniStatus Event Analyzer</h1>
+
+      <!-- 1. Selection Controls -->
+      <div class="controls">
+        <div>
+          <label>Start (UTC)</label>
+          <input type="text" id="start-time" placeholder="Select Start Time" />
+        </div>
+        <div>
+          <label>End (UTC)</label>
+          <input type="text" id="end-time" placeholder="Select End Time" />
+        </div>
+        <button onclick="loadEvents()">Load Unique Events</button>
+        <span id="status">Ready</span>
+      </div>
+
+      <div class="main-grid">
+        <!-- 2. Event List -->
+        <div class="card">
+          <h2 style="margin-top: 0">Step 1: Select Events</h2>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            "
+          >
+            <span id="count-display">0 loaded</span>
+            <div>
+              <button
+                class="secondary"
+                style="font-size: 0.8rem; padding: 4px 8px"
+                onclick="toggleAll(true)"
+              >
+                Select All
+              </button>
+              <button
+                class="secondary"
+                style="font-size: 0.8rem; padding: 4px 8px"
+                onclick="toggleAll(false)"
+              >
+                None
+              </button>
+            </div>
+          </div>
+          <div id="event-list" class="event-list">
+            <div style="text-align: center; padding: 20px; color: #64748b">
+              Click "Load Unique Events" to start
+            </div>
+          </div>
+          
+          <!-- Question Input -->
+          <div style="margin-top: 20px;">
+             <label for="user-question" style="display:block; margin-bottom:5px;">Specific Question (Optional):</label>
+             <input type="text" id="user-question" placeholder="E.g. Is there any person wearing red?" style="width:100%; padding: 8px; background:#0f172a; border:1px solid var(--border); color:white; border-radius:4px;">
+          </div>
+
+          <div style="margin-top: 15px; display: flex; justify-content: flex-end; gap: 10px; align-items: center;">
+            <label for="model-selector" style="margin:0;">Model:</label>
+            <select id="model-selector" onchange="updateUIState()" style="background:#0f172a; border:1px solid var(--border); color:white; padding: 8px; border-radius:4px;">
+                <option value="gpt-4.1">GPT-4.1 (Default)</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            </select>
+            
+            <button onclick="downloadRAG()" id="btn-export" class="secondary">
+              Download for RAG &#128190;
+            </button>
+            
+            <button onclick="analyzeSelected()" id="btn-analyze" disabled>
+              Step 2: Analyze Selected &rarr;
+            </button>
+          </div>
+          <div id="limit-warning" style="color: #ef4444; margin-top: 10px; text-align: right; display: none; font-size: 0.9rem;">
+             ⚠ Too many events for this model (>50). Switch to a 'Mini' model or use Export for RAG.
+          </div>
+        </div>
+
+        <!-- 3. Analysis Result -->
+        <div class="card">
+          <h2 style="margin-top: 0">Step 3: Review & Send</h2>
+          <label>LLM Analysis Result:</label>
+          <textarea
+            id="result-area"
+            readonly
+            placeholder="Analysis summary will appear here..."
+          ></textarea>
+
+          <div
+            style="
+              margin-top: 15px;
+              display: flex;
+              gap: 10px;
+              justify-content: flex-end;
+            "
+          >
+            <div style="margin-right: auto; align-self: center">
+              Score: <strong id="score-display">-</strong>
+            </div>
+            <button
+              class="success"
+              onclick="sendToTelegram()"
+              id="btn-telegram"
+              disabled
+            >
+              Send to Telegram &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top: 20px; background: #000; font-family: monospace; padding: 10px; border-radius: 4px;">
+        <h3 style="margin-top:0; color: #888;">Debug Log</h3>
+        <div id="debug-log" style="color: #0f0; font-size: 0.8rem; white-space: pre-wrap; height: 100px; overflow-y: auto;">Waiting for action...</div>
+      </div>
+    </div>
+
+    <script>
+      const API_URL = "http://localhost:8003"; // Adjust if running elsewhere
+
+      function logDev(msg) {
+          const d = document.getElementById("debug-log");
+          d.textContent += "\n" + "[" + new Date().toLocaleTimeString() + "] " + msg;
+          d.scrollTop = d.scrollHeight;
+          console.log(msg);
+      }
+
+      let loadedEvents = [];
+      let fpStart, fpEnd;
+
+      // Set default times (last 3 hours)
+      function setDefaults() {
+        try {
+            const now = new Date();
+            const start = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+            const end = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24h into the future
+
+            // Init Flatpickr
+            fpStart = flatpickr("#start-time", {
+                enableTime: true,
+                dateFormat: "Y-m-d H:i",
+                defaultDate: start,
+                time_24hr: true,
+                theme: "dark"
+            });
+            
+            fpEnd = flatpickr("#end-time", {
+                enableTime: true,
+                dateFormat: "Y-m-d H:i",
+                defaultDate: end,
+                time_24hr: true,
+                theme: "dark"
+            });
+
+            logDev("Defaults set with Flatpickr. Ready.");
+        } catch (e) {
+            logDev("Error setting defaults: " + e.message);
+        }
+      }
+      setDefaults();
+
+      function setStatus(msg, type = "normal") {
+        const el = document.getElementById("status");
+        el.textContent = msg;
+        el.className =
+          type === "loading" ? "loading" : type === "error" ? "error" : "ok";
+      }
+
+      async function loadEvents() {
+        // Get dates from simple value or flatpickr instance
+        const startVal = document.getElementById("start-time").value;
+        const endVal = document.getElementById("end-time").value;
+        
+        logDev(`Loading events... Start=${startVal} End=${endVal}`);
+
+        if (!startVal) return alert("Please select start time");
+
+        // Use the ISO string from flatpickr selectedDates if available for precision, or parse value
+        // Flatpickr handles local time to Date obj naturally
+        const dStart = fpStart.selectedDates[0];
+        const dEnd = fpEnd.selectedDates[0];
+        
+        if (!dStart) return alert("Invalid Start Date");
+
+        const startISO = dStart.toISOString();
+        const endISO = dEnd ? dEnd.toISOString() : null;
+
+        setStatus("Loading...", "loading");
+
+        try {
+          let url = `${API_URL}/unique_events?start=${encodeURIComponent(
+            startISO
+          )}`;
+          if (endISO) url += `&end=${encodeURIComponent(endISO)}`;
+          
+          logDev("Fetching: " + url);
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("Failed to fetch: " + res.status + " " + res.statusText);
+          const data = await res.json();
+          logDev("Response RX: " + JSON.stringify(data).substring(0, 100) + "...");
+
+          loadedEvents = data.groups || [];
+          logDev(`Got ${loadedEvents.length} groups. Rendering...`);
+          
+          renderEvents(loadedEvents);
+          setStatus(
+            `Loaded ${data.count_unique} unique items (from ${data.count_raw} raw)`,
+            "ok"
+          );
+
+          document.getElementById("btn-analyze").disabled =
+            loadedEvents.length === 0;
+        } catch (e) {
+          console.error(e);
+          logDev("ERROR: " + e.message);
+          setStatus("Error loading events: " + e.message, "error");
+        }
+      }
+
+      function renderEvents(groups) {
+        try {
+            const container = document.getElementById("event-list");
+            container.innerHTML = "";
+    
+            document.getElementById(
+              "count-display"
+            ).textContent = `${groups.length} items`;
+    
+            if (groups.length === 0) {
+                 container.innerHTML = "<div style='padding:20px; text-align:center;'>No events found in this range.</div>";
+                 return;
+            }
+
+            groups.forEach((g, idx) => {
+              const d = document.createElement("div");
+              d.className = "event-item";
+              
+              // Safe date parsing
+              let t1 = g.timestamp_first;
+              let t2 = g.timestamp_last;
+              try { t1 = new Date(t1).toLocaleTimeString(); } catch(e) { t1 = g.timestamp_first; }
+              try { t2 = new Date(t2).toLocaleTimeString(); } catch(e) { t2 = g.timestamp_last; }
+
+              d.innerHTML = `
+                    <input type="checkbox" class="event-check" id="chk-${idx}" checked>
+                    <div class="event-content">
+                        <div>${(g.sample_text || "").substring(0, 150)}${
+                (g.sample_text || "").length > 150 ? "..." : ""
+              }</div>
+                        <div class="event-meta">
+                            <span>First: ${t1}</span>
+                            <span class="badge">${g.count}x</span>
+                            <span>Last: ${t2}</span>
+                        </div>
+                    </div>
+                `;
+              
+              // Append to DOM before querying
+              container.appendChild(d);
+              
+              // Add listener for this specific checkbox
+              d.querySelector(".event-check").addEventListener("change", updateUIState);
+            });
+            logDev("Render complete.");
+            updateUIState();
+        } catch (e) {
+            logDev("Render Error: " + e.message);
+        }
+      }
+      
+      // ... keep rest ...
+      
+      function toggleAll(checked) {
+        document
+          .querySelectorAll(".event-check")
+          .forEach((c) => (c.checked = checked));
+      }
+
+      // Update UI based on selection and model
+      function updateUIState() {
+          const selectedCount = document.querySelectorAll(".event-check:checked").length;
+          const model = document.getElementById("model-selector").value;
+          const isMini = model.toLowerCase().includes("mini");
+          
+          const maxLimit = isMini ? 200 : 50;
+          const analyzeBtn = document.getElementById("btn-analyze");
+          const warningEl = document.getElementById("limit-warning");
+          
+          // Logic
+          if (selectedCount === 0) {
+              analyzeBtn.disabled = true;
+              warningEl.style.display = "none";
+              return;
+          }
+          
+          if (selectedCount > maxLimit) {
+              analyzeBtn.disabled = true;
+              analyzeBtn.title = `Limit exceeded for ${model} (Max ${maxLimit})`;
+              warningEl.style.display = "block";
+              warningEl.textContent = `⚠ Too many events (${selectedCount}) for ${model}. Max is ${maxLimit}. Use Export or switch to Mini.`;
+          } else {
+              analyzeBtn.disabled = false;
+              analyzeBtn.title = "Ready to analyze";
+              warningEl.style.display = "none";
+          }
+      }
+
+      async function downloadRAG() {
+          // Gather selected
+          const selected = [];
+          document.querySelectorAll(".event-check").forEach((chk, idx) => {
+            if (chk.checked) selected.push(loadedEvents[idx]);
+          });
+          
+          if (selected.length === 0) return alert("Select events first!");
+          
+          setStatus("Generating RAG Export...", "loading");
+          
+          try {
+             const res = await fetch(`${API_URL}/export_rag`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ events: selected }),
+             });
+             
+             if (!res.ok) throw new Error("Export Failed");
+             const data = await res.json();
+             
+             // Trigger Download
+             const blob = new Blob([data.markdown], { type: 'text/markdown' });
+             const url = window.URL.createObjectURL(blob);
+             const a = document.createElement('a');
+             a.href = url;
+             a.download = `OmniStatus_RAG_Export_${new Date().toISOString().slice(0,19)}.md`;
+             document.body.appendChild(a);
+             a.click();
+             window.URL.revokeObjectURL(url);
+             document.body.removeChild(a);
+             
+             setStatus("RAG Export Downloaded!", "ok");
+          } catch(e) {
+              setStatus("Export Error: " + e.message, "error");
+          }
+      }
+
+      async function analyzeSelected() {
+        // Gather selected groups
+        const selected = [];
+        document.querySelectorAll(".event-check").forEach((chk, idx) => {
+          if (chk.checked) selected.push(loadedEvents[idx]);
+        });
+        
+        // Correctly retrieve user question
+        const questionInput = document.getElementById("user-question");
+        const question = questionInput ? questionInput.value.trim() : "";
+
+        // Retrieve selected model
+        const modelSelector = document.getElementById("model-selector");
+        const selectedModel = modelSelector ? modelSelector.value : null;
+
+        if (selected.length === 0) return alert("Select at least one event");
+
+        setStatus("Analyzing with LLM...", "loading");
+        logDev(`Analyzing ${selected.length} items... Question: "${question}" Model: ${selectedModel}`);
+        document.getElementById("result-area").value = "Thinking...";
+        document.getElementById("btn-telegram").disabled = true;
+
+        try {
+          const res = await fetch(`${API_URL}/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                events: selected,
+                question: question ? question : null,
+                model: selectedModel
+            }),
+          });
+          const data = await res.json();
+
+          document.getElementById("result-area").value = data.text;
+          document.getElementById("score-display").textContent = data.score;
+          setStatus("Analysis complete", "ok");
+          logDev("Analysis OK. Score: " + data.score);
+          document.getElementById("btn-telegram").disabled = false;
+        } catch (e) {
+          logDev("Analysis Error: " + e.message);
+          setStatus("Analysis failed: " + e.message, "error");
+          document.getElementById("result-area").value = "Error";
+        }
+      }
+
+      async function sendToTelegram() {
+        const text = document.getElementById("result-area").value;
+        if (!text) return;
+        if (!confirm("Confirm sending this report to Telegram?")) return;
+
+        setStatus("Sending...", "loading");
+        logDev("Sending to Telegram...");
+        try {
+          const res = await fetch(`${API_URL}/telegram`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text }),
+          });
+
+          if (!res.ok) throw new Error("API Error");
+          setStatus("Sent to Telegram!", "ok");
+          logDev("Telegram Sent.");
+        } catch (e) {
+          setStatus("Failed to send: " + e.message, "error");
+          logDev("Telegram Failed: " + e.message);
+        }
+      }
+    </script>
+  </body>
+</html>
