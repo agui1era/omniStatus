@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     MONGO_DB_NAME: str = "omnistatus"
     MONGO_COLL_NAME: str = "events"
     MONGO_COLL_VICTORIA: str = "victoria_history"
+    MONGO_QUERY_MAX_TIME_MS: int = 3000
 
     # Analysis
     SYSTEM_PROMPT: str = (

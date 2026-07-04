@@ -15,12 +15,13 @@ import hmac
 import time
 import datetime as dt
 from collections import defaultdict
-from typing import Optional, List
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from app.config import settings
-from app.database import get_event_collection, get_victoria_collection
+from app.database import get_event_collection
+from app.event_queries import query_collection
 
 
 # ===== Rate Limiter (stricter for external) =====
@@ -108,16 +109,6 @@ def _extract_score(ev: dict) -> Optional[float]:
     return None
 
 
-def _parse_iso(value: str) -> Optional[str]:
-    try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo:
-            parsed = parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
-        return parsed.isoformat()
-    except Exception:
-        return None
-
-
 # ──────────────── endpoints ────────────────
 
 @router.get("/health")
@@ -131,48 +122,29 @@ async def ext_events(
     _=Depends(require_external_key),
     start: Optional[str] = None,
     end: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     source: Optional[str] = None,
     text: Optional[str] = None,
+    min_score: Optional[float] = Query(None, ge=0.0),
     limit: int = Query(100, ge=1, le=500),
 ):
     """Read-only event query for external consumers."""
-    mongo_filter: dict = {}
-
-    ts_filter: dict = {}
-    if start:
-        s = _parse_iso(start)
-        if not s:
-            return {"count": 0, "items": [], "error": "invalid start (ISO8601)"}
-        ts_filter["$gte"] = s
-    if end:
-        e = _parse_iso(end)
-        if not e:
-            return {"count": 0, "items": [], "error": "invalid end (ISO8601)"}
-        ts_filter["$lte"] = e
-    if ts_filter:
-        mongo_filter["timestamp"] = ts_filter
-
-    if source:
-        mongo_filter["source"] = {"$regex": source, "$options": "i"}
-    if text:
-        mongo_filter["$or"] = [
-            {"text": {"$regex": text, "$options": "i"}},
-            {"description": {"$regex": text, "$options": "i"}},
-        ]
-
-    try:
-        coll = get_event_collection()
-        cursor = coll.find(mongo_filter, sort=[("timestamp", -1)]).limit(limit)
-        events = [_serialize(doc) async for doc in cursor]
-        return {"count": len(events), "items": events}
-    except Exception as exc:
-        return {"count": 0, "items": [], "error": str(exc)}
+    return await query_collection(
+        get_event_collection(),
+        start or since,
+        end or until,
+        source,
+        text,
+        limit,
+        min_score,
+    )
 
 
 @router.get("/events/summary")
 async def ext_events_summary(
     _=Depends(require_external_key),
-    mode: str = Query("day", regex="^(3h|day)$"),
+    mode: str = Query("day", pattern="^(3h|day)$"),
     limit: int = Query(100, ge=1, le=500),
 ):
     """Aggregated event summary (buckets of 3h or day)."""

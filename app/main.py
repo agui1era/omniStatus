@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import db, get_event_collection, get_victoria_collection
+from app.event_queries import query_collection
 from app.models import Event
 from app.auth import require_api_key
 from app.services.llm import openai_analyze_events
@@ -38,7 +39,9 @@ async def _startup_analysis() -> None:
 async def lifespan(app: FastAPI):
     db.connect()
     await get_event_collection().create_index([("timestamp", -1)])
+    await get_event_collection().create_index([("source", 1), ("timestamp", -1)])
     await get_victoria_collection().create_index([("timestamp", -1)])
+    await get_victoria_collection().create_index([("source", 1), ("timestamp", -1)])
     task = None
     if settings.ENABLE_COMPLEX_ANALYSIS_CRON:
         asyncio.create_task(_startup_analysis())
@@ -66,23 +69,6 @@ app.add_middleware(
 # ===== Utils =====
 def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
-
-def parse_iso_dt(value: str) -> Optional[str]:
-    """Parses flexible ISO8601 dates and returns normalized ISO string."""
-    try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
-        # Save in UTC if timestamp comes with tzinfo
-        if parsed.tzinfo:
-            parsed = parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
-        return parsed.isoformat()
-    except Exception:
-        return None
-
-def serialize_event(doc: dict) -> dict:
-    data = dict(doc)
-    if "_id" in data:
-        data["_id"] = str(data["_id"])
-    return data
 
 def extract_score(ev: dict) -> Optional[float]:
     for key in ("score", "value", "valor", "promedio"):
@@ -162,46 +148,6 @@ async def summarize_collection(target_coll, mode: str, limit_buckets: int = 200)
     return items[:limit_buckets]
 
 
-async def query_collection(
-    target_coll,
-    start: Optional[str],
-    end: Optional[str],
-    source: Optional[str],
-    text: Optional[str],
-    limit: int,
-):
-    mongo_filter = {}
-
-    ts_filter = {}
-    if start:
-        start_iso = parse_iso_dt(start)
-        if not start_iso:
-            return {"count": 0, "items": [], "error": "invalid start (ISO8601)"}
-        ts_filter["$gte"] = start_iso
-    if end:
-        end_iso = parse_iso_dt(end)
-        if not end_iso:
-            return {"count": 0, "items": [], "error": "invalid end (ISO8601)"}
-        ts_filter["$lte"] = end_iso
-    if ts_filter:
-        mongo_filter["timestamp"] = ts_filter
-
-    if source:
-        mongo_filter["source"] = {"$regex": source, "$options": "i"}
-
-    if text:
-        mongo_filter["$or"] = [
-            {"text": {"$regex": text, "$options": "i"}},
-            {"description": {"$regex": text, "$options": "i"}},
-        ]
-
-    try:
-        cursor = target_coll.find(mongo_filter, sort=[("timestamp", -1)]).limit(limit)
-        events = [serialize_event(e) async for e in cursor]
-        return {"count": len(events), "items": events, "applied_filter": mongo_filter}
-    except Exception as e:
-        return {"count": 0, "items": [], "error": str(e), "applied_filter": mongo_filter}
-
 # ===== Endpoints =====
 @app.get("/health")
 async def health():
@@ -234,11 +180,22 @@ async def add_event_protected(ev: Event, _=Depends(require_api_key)):
 async def list_events(
     start: Optional[str] = None,
     end: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     source: Optional[str] = None,
     text: Optional[str] = None,
+    min_score: Optional[float] = Query(None, ge=0.0),
     limit: int = Query(200, ge=1, le=1000),
 ):
-    return await query_collection(get_event_collection(), start, end, source, text, limit)
+    return await query_collection(
+        get_event_collection(),
+        start or since,
+        end or until,
+        source,
+        text,
+        limit,
+        min_score,
+    )
 
 
 @app.get("/events/raw")
@@ -246,11 +203,45 @@ async def list_events_raw(
     _=Depends(require_api_key),
     start: Optional[str] = None,
     end: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     source: Optional[str] = None,
     text: Optional[str] = None,
+    min_score: Optional[float] = Query(None, ge=0.0),
     limit: int = Query(200, ge=1, le=1000),
 ):
-    return await query_collection(get_event_collection(), start, end, source, text, limit)
+    return await query_collection(
+        get_event_collection(),
+        start or since,
+        end or until,
+        source,
+        text,
+        limit,
+        min_score,
+    )
+
+
+@app.get("/events/external")
+async def list_external_events(
+    _=Depends(require_api_key),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    source: Optional[str] = None,
+    text: Optional[str] = None,
+    min_score: Optional[float] = Query(None, ge=0.0),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    return await query_collection(
+        get_victoria_collection(),
+        start or since,
+        end or until,
+        source,
+        text,
+        limit,
+        min_score,
+    )
 
 
 @app.get("/events/summary/3h")
@@ -269,11 +260,22 @@ async def summary_day(limit: int = Query(200, ge=1, le=1000)):
 async def victoria_history(
     start: Optional[str] = None,
     end: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     source: Optional[str] = None,
     text: Optional[str] = None,
+    min_score: Optional[float] = Query(None, ge=0.0),
     limit: int = Query(200, ge=1, le=1000),
 ):
-    return await query_collection(get_victoria_collection(), start, end, source, text, limit)
+    return await query_collection(
+        get_victoria_collection(),
+        start or since,
+        end or until,
+        source,
+        text,
+        limit,
+        min_score,
+    )
 
 
 @app.get("/victoria/history/summary/3h")

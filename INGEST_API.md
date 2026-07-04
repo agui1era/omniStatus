@@ -171,7 +171,7 @@ curl -X POST http://localhost:8001/ingest/event \
 
 ## Query Inserted Events
 
-Protected raw event read for external systems:
+Protected raw event read for the main events collection:
 
 ```http
 GET /events/raw
@@ -184,14 +184,18 @@ Query parameters:
 |-----------|------|-------------|
 | `start` | ISO8601 string | Include events with `timestamp >= start`. |
 | `end` | ISO8601 string | Include events with `timestamp <= end`. |
-| `source` | string | Case-insensitive source filter. |
+| `since` | ISO8601 string | Alias for `start`; useful for agent queries. |
+| `until` | ISO8601 string | Alias for `end`; useful for agent queries. |
+| `source` | string | Exact source filter. |
 | `text` | string | Case-insensitive text/description filter. |
+| `min_score` | float | Include events with `score`, `avg_score`, `value`, `valor`, or `promedio` greater than or equal to this value. |
 | `limit` | integer | Max rows returned, `1` to `1000`. Default `200`. |
 
 ```http
 GET /events/raw?limit=20
 GET /events/raw?source=pax_radar&limit=20
 GET /events/raw?start=2026-07-04T00:00:00Z&end=2026-07-04T23:59:59Z
+GET /events/raw?min_score=0.5&since=2026-07-03T00:00:00Z
 ```
 
 Example:
@@ -219,12 +223,22 @@ Response:
     }
   ],
   "applied_filter": {
-    "source": {
-      "$regex": "pax_radar",
-      "$options": "i"
-    }
+    "source": "pax_radar"
   }
 }
+```
+
+Protected external collection read:
+
+```http
+GET /events/external
+X-API-Key: <OMNISTATUS_API_KEY>
+```
+
+`/events/external` supports the same parameters and returns the same `{count, items, applied_filter}` shape as `/events/raw`, but reads the external/Victoria collection configured by `MONGO_COLL_VICTORIA`.
+
+```http
+GET /events/external?min_score=0.5&since=2026-07-03T00:00:00Z&limit=50
 ```
 
 ## Analyze Inserted Events

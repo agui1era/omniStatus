@@ -118,8 +118,9 @@ API available at `http://localhost:8001`. Swagger docs at `http://localhost:8001
 | `GET` | `/health` | Health check |
 | `POST` | `/event` | Internal/trusted event ingest |
 | `POST` | `/ingest/event` | API-key protected event ingest (`X-API-Key`) |
-| `GET` | `/events` | Query events (`start`, `end`, `source`, `text`, `limit`) |
+| `GET` | `/events` | Query events (`start`/`since`, `end`/`until`, `source`, `text`, `min_score`, `limit`) |
 | `GET` | `/events/raw` | API-key protected raw event query |
+| `GET` | `/events/external` | API-key protected external collection query with the same response format as `/events/raw` |
 | `GET` | `/events/summary/3h` | Events bucketed into 3-hour periods |
 | `GET` | `/events/summary/day` | Events bucketed by day |
 
