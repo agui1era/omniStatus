@@ -34,18 +34,26 @@ def _event_timestamp(value: Any) -> Optional[dt.datetime]:
     return None
 
 
-async def load_recent_events(hours: int, limit: int) -> list[dict]:
+async def load_recent_events(hours: int, limit: int, source_regex: str | None = None) -> list[dict]:
     lookback_hours = max(1, hours)
     max_events = max(1, limit)
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=lookback_hours)
     cutoff_iso = cutoff.isoformat()
 
-    mongo_filter = {
+    timestamp_filter = {
         "$or": [
             {"timestamp": {"$gte": cutoff}},
             {"timestamp": {"$gte": cutoff_iso}},
         ]
     }
+    mongo_filter = timestamp_filter
+    if source_regex:
+        mongo_filter = {
+            "$and": [
+                timestamp_filter,
+                {"source": {"$regex": source_regex, "$options": "i"}},
+            ]
+        }
 
     cursor = (
         get_event_collection()
@@ -87,6 +95,7 @@ async def run_complex_analysis(hours: int | None = None) -> dict:
     events = await load_recent_events(
         lookback_hours,
         settings.COMPLEX_ANALYSIS_MAX_EVENTS,
+        settings.COMPLEX_ANALYSIS_SOURCE_REGEX,
     )
     if not events:
         return {
@@ -95,6 +104,7 @@ async def run_complex_analysis(hours: int | None = None) -> dict:
             "msg": "No recent events.",
             "events_count": 0,
             "window_hours": lookback_hours,
+            "source_filter": settings.COMPLEX_ANALYSIS_SOURCE_REGEX,
             "notification": {"sent": False, "reason": "no_events"},
         }
 
@@ -118,6 +128,7 @@ async def run_complex_analysis(hours: int | None = None) -> dict:
         "events_count": observed_events,
         "event_documents": len(events),
         "window_hours": lookback_hours,
+        "source_filter": settings.COMPLEX_ANALYSIS_SOURCE_REGEX,
         "model": settings.COMPLEX_ANALYSIS_MODEL,
         "notification": notification,
     }
@@ -125,6 +136,7 @@ async def run_complex_analysis(hours: int | None = None) -> dict:
 
 async def complex_analysis_cron() -> None:
     interval_seconds = max(1, settings.COMPLEX_ANALYSIS_CRON_HOURS) * 60 * 60
+    await asyncio.sleep(interval_seconds)
     while True:
         try:
             result = await run_complex_analysis()
@@ -139,5 +151,3 @@ async def complex_analysis_cron() -> None:
         except Exception as exc:
             print(f"Complex analysis cron error: {exc}")
         await asyncio.sleep(interval_seconds)
-
-

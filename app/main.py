@@ -3,13 +3,14 @@ import contextlib
 import datetime as dt
 from contextlib import asynccontextmanager
 from typing import Optional, List
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Query
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import db, get_event_collection, get_victoria_collection
 from app.models import Event
+from app.auth import require_api_key
 from app.services.llm import openai_analyze_events
 from app.services.complex_analysis import (
     complex_analysis_cron,
@@ -206,8 +207,7 @@ async def query_collection(
 async def health():
     return {"ok": True, "ts": now_iso()}
 
-@app.post("/event")
-async def add_event(ev: Event):
+async def store_event(ev: Event):
     data = ev.model_dump() # Pydantic v2
     if not data.get("timestamp"):
         data["timestamp"] = now_iso()
@@ -219,8 +219,31 @@ async def add_event(ev: Event):
         print(f"⚠ Error saving event: {e}")
         return {"status": "error", "message": str(e)}
 
+
+@app.post("/event")
+async def add_event(ev: Event):
+    return await store_event(ev)
+
+
+@app.post("/ingest/event")
+async def add_event_protected(ev: Event, _=Depends(require_api_key)):
+    return await store_event(ev)
+
+
 @app.get("/events")
 async def list_events(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    source: Optional[str] = None,
+    text: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=1000),
+):
+    return await query_collection(get_event_collection(), start, end, source, text, limit)
+
+
+@app.get("/events/raw")
+async def list_events_raw(
+    _=Depends(require_api_key),
     start: Optional[str] = None,
     end: Optional[str] = None,
     source: Optional[str] = None,

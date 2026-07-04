@@ -116,8 +116,10 @@ API available at `http://localhost:8001`. Swagger docs at `http://localhost:8001
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Health check |
-| `POST` | `/event` | Ingest an event |
+| `POST` | `/event` | Internal/trusted event ingest |
+| `POST` | `/ingest/event` | API-key protected event ingest (`X-API-Key`) |
 | `GET` | `/events` | Query events (`start`, `end`, `source`, `text`, `limit`) |
+| `GET` | `/events/raw` | API-key protected raw event query |
 | `GET` | `/events/summary/3h` | Events bucketed into 3-hour periods |
 | `GET` | `/events/summary/day` | Events bucketed by day |
 
@@ -150,7 +152,9 @@ API available at `http://localhost:8001`. Swagger docs at `http://localhost:8001
 
 ### Event Ingestion
 
-Events are submitted via `POST /event` with `source`, `text`, and optional `score` and `timestamp`. OmniStatus also accepts pre-aggregated payloads with `event_count`, `avg_score`, `first_seen`, `last_seen`, `summary`, `dedup_key`, and `samples` — useful for systems like Sentinex that batch detections before sending.
+Events are submitted via internal `POST /event` or protected `POST /ingest/event` with `source`, `text`, and optional `score` and `timestamp`. OmniStatus also accepts pre-aggregated payloads with `event_count`, `avg_score`, `first_seen`, `last_seen`, `summary`, `dedup_key`, and `samples` — useful for systems like Sentinex that batch detections before sending.
+
+For the full ingestion contract for other systems, see [INGEST_API.md](INGEST_API.md).
 
 ### Event Deduplication
 
@@ -158,7 +162,7 @@ Before sending events to the LLM, repeated events are aggregated by source + tex
 
 ### Periodic Analysis Cron
 
-The built-in cron reads the last `COMPLEX_ANALYSIS_LOOKBACK_HOURS` of events, sends them to the LLM, and optionally delivers a summary via Telegram. Runs every `COMPLEX_ANALYSIS_CRON_HOURS` hours inside the API process — no separate worker needed.
+The built-in cron reads the last `COMPLEX_ANALYSIS_LOOKBACK_HOURS` of events from the main `events` collection, filters them with `COMPLEX_ANALYSIS_SOURCE_REGEX`, sends them to the LLM, and optionally delivers a summary via Telegram. Runs every `COMPLEX_ANALYSIS_CRON_HOURS` hours inside the API process — no separate worker needed.
 
 ### Custom Analysis
 
@@ -177,6 +181,7 @@ The built-in cron reads the last `COMPLEX_ANALYSIS_LOOKBACK_HOURS` of events, se
 | `COMPLEX_ANALYSIS_LOOKBACK_HOURS` | `3` | Hours of events to read per cron run |
 | `COMPLEX_ANALYSIS_CRON_HOURS` | `3` | How often the cron runs (hours) |
 | `COMPLEX_ANALYSIS_MAX_EVENTS` | `500` | Max events per analysis run |
+| `COMPLEX_ANALYSIS_SOURCE_REGEX` | `^(CAM\|sentinex)` | Source regex used by cron/manual complex analysis |
 | `COMPLEX_ANALYSIS_SUMMARY_MAX_CHARS` | `200` | Max chars in cron summary |
 | `CUSTOM_ANALYSIS_SUMMARY_MAX_CHARS` | `200` | Max chars in custom analysis summary |
 | `ALERT_SCORE_THRESHOLD` | `0.5` | Score (0–1) that triggers alerts |
@@ -185,6 +190,7 @@ The built-in cron reads the last `COMPLEX_ANALYSIS_LOOKBACK_HOURS` of events, se
 | `TELEGRAM_CHAT_ID` | — | Telegram chat/channel ID |
 | `EXTERNAL_API_KEY` | — | API key for `/ext/` endpoints |
 | `SERVER_PORT` | `8001` | API server port |
+| `OMNISTATUS_API_KEY` | — | API key required by protected `POST /ingest/event` |
 
 ### MongoDB Connection Examples
 
@@ -203,8 +209,9 @@ MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/
 
 ```bash
 # Send a test event
-curl -X POST http://localhost:8001/event \
+curl -X POST http://localhost:8001/ingest/event \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $OMNISTATUS_API_KEY" \
   -d '{"source": "cam_1", "text": "Motion detected at entrance", "score": 0.75}'
 
 # Query recent events

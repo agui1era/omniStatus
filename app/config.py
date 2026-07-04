@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "OmniStatus"
     SERVER_PORT: int = 8001
     EXTERNAL_API_KEY: str = ""
+    OMNISTATUS_API_KEY: str = ""
 
     # OpenAI
     OPENAI_API_KEY: str = ""
@@ -56,9 +57,11 @@ class Settings(BaseSettings):
     COMPLEX_ANALYSIS_SUMMARY_MAX_CHARS: int = 200
     CUSTOM_ANALYSIS_SUMMARY_MAX_CHARS: int = 200
     COMPLEX_ANALYSIS_MAX_EVENTS: int = 500
+    COMPLEX_ANALYSIS_SOURCE_REGEX: str = "^(CAM|sentinex)"
     COMPLEX_ANALYSIS_PROMPT: str = (
-        "You are analyzing image descriptions from surveillance cameras at a plant nursery (vivero). "
-        "Summarize what the cameras detected during the time window: people, vehicles, activity in crop/plant areas, access points, etc. "
+        "You are analyzing only SENTINEX surveillance camera events from a plant nursery (vivero). "
+        "Ignore any non-SENTINEX context if it appears. "
+        "Summarize what the SENTINEX cameras detected during the time window: people, vehicles, activity in crop/plant areas, access points, etc. "
         "You MUST always describe what actually happened — never say 'nothing happened' or 'no activity'. "
         "If activity was low, describe what little was detected: how many detections, where, at what times. "
         "Highlight any unusual detections, recurring patterns, or anything that could indicate a threat, intrusion, or damage. "
